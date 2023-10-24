@@ -1,3 +1,165 @@
-fn main() {
-    println!("Hello, world!");
+use getopts::Options;
+use pcap::Capture;
+use std::env;
+use std::error::Error;
+use std::path::Path;
+use wasmedge_sdk::{
+    config::{CommonConfigOptions, ConfigBuilder, HostRegistrationConfigOptions},
+    dock::{Param, VmDock},
+    Module, VmBuilder,
+};
+
+struct Opts {
+    wasm_file_path: String,
+    port: u16,
+    protocol: Option<String>,
+    interface: String,
+    is_promiscuous: bool,
+}
+
+fn parse_opts() -> Result<Opts, Box<dyn Error>> {
+    const PORT_LONG_OPT_NAME: &str = "port";
+    const PROTOCOL_LONG_OPT_NAME: &str = "protocol";
+    const INTERFACE_LONG_OPT_NAME: &str = "interface";
+    const PROMISCUOUS_LONG_OPT_NAME: &str = "promiscuous";
+    const HELP_LONG_OPT_NAME: &str = "help";
+    const WASM_FILE_LONG_OPT_NAME: &str = "wasm-file";
+
+    let args: Vec<String> = env::args().collect();
+    let program = args[0].clone();
+
+    let mut opts = Options::new();
+    opts.optopt(
+        "w",
+        &WASM_FILE_LONG_OPT_NAME,
+        "file path to the wasm file",
+        "/path/to/app.wasm",
+    );
+    opts.optopt("p", &PORT_LONG_OPT_NAME, "port number for capture", "PORT");
+    opts.optopt(
+        "P",
+        &PROTOCOL_LONG_OPT_NAME,
+        "layer 4 protocol name for capture",
+        "L4PROTOCOL",
+    );
+    opts.optopt(
+        "i",
+        &INTERFACE_LONG_OPT_NAME,
+        "network interface name",
+        "INTERFACE",
+    );
+    opts.optflag(
+        "",
+        &PROMISCUOUS_LONG_OPT_NAME,
+        "capture packets as promiscuous mode",
+    );
+    opts.optflag("h", &HELP_LONG_OPT_NAME, "print this help menu");
+    let matches = match opts.parse(&args[1..]) {
+        Ok(m) => m,
+        Err(f) => return Err(f.into()),
+    };
+
+    if matches.opt_present(&HELP_LONG_OPT_NAME) {
+        let brief = format!("Usage: {} [options]", program);
+        print!("{}", opts.usage(&brief));
+        return Err("TODO: usage shown".into());
+    }
+
+    let port = match matches.opt_str(&PORT_LONG_OPT_NAME) {
+        Some(port_str) => match port_str.parse::<u16>() {
+            Ok(port) => port,
+            Err(e) => {
+                return Err(e.into());
+            }
+        },
+        None => {
+            return Err(format!(
+                "--{} option is mandatory but the value is missing",
+                &PORT_LONG_OPT_NAME
+            )
+            .into())
+        }
+    };
+
+    let interface = match matches.opt_str(&INTERFACE_LONG_OPT_NAME) {
+        Some(interface) => interface,
+        None => {
+            return Err(format!(
+                "--{} option is mandatory but the value is missing",
+                &INTERFACE_LONG_OPT_NAME
+            )
+            .into())
+        }
+    };
+
+    let wasm_file_path = match matches.opt_str(&WASM_FILE_LONG_OPT_NAME) {
+        Some(warm_file_path) => warm_file_path,
+        None => {
+            return Err(format!(
+                "--{} option is mandatory but the value is missing",
+                &WASM_FILE_LONG_OPT_NAME
+            )
+            .into())
+        }
+    };
+
+    Ok(Opts {
+        wasm_file_path,
+        port,
+        protocol: matches.opt_str(&PROTOCOL_LONG_OPT_NAME),
+        interface,
+        is_promiscuous: matches.opt_present(&PROMISCUOUS_LONG_OPT_NAME),
+    })
+}
+
+fn init_wasm_vm(wasm_filepath: &Path) -> Result<VmDock, Box<dyn Error>> {
+    let module = Module::from_file(None, wasm_filepath)?;
+
+    let config = ConfigBuilder::new(CommonConfigOptions::default())
+        .with_host_registration_config(HostRegistrationConfigOptions::default().wasi(true))
+        .build()?;
+
+    if !config.wasi_enabled() {
+        return Err("wasi is unable on WasmEdge configuration".into());
+    }
+
+    Ok(VmDock::new(
+        VmBuilder::new()
+            .with_config(config)
+            .build()?
+            .register_module(None, module)?,
+    ))
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let opts = match parse_opts() {
+        Ok(opts) => opts,
+        Err(e) => {
+            return Err(e);
+        }
+    };
+
+    let mut cap = Capture::from_device(opts.interface.as_str())?
+        .immediate_mode(true)
+        .promisc(opts.is_promiscuous)
+        .open()?;
+
+    cap.filter(
+        &format!("{} port {}", opts.protocol.unwrap_or("".into()), opts.port),
+        true,
+    )?;
+
+    let vm = init_wasm_vm(Path::new(&opts.wasm_file_path))?;
+
+    while let Ok(packet) = cap.next_packet() {
+        match vm.run_func("run", vec![Param::VecU8(&packet.data.to_vec())])? {
+            Ok(_) => {}
+            Err(e) => {
+                // TODO: don't exit mode
+                return Err(e.into());
+            }
+        };
+    }
+
+    Ok(())
 }
