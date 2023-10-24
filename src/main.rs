@@ -11,15 +11,13 @@ use wasmedge_sdk::{
 
 struct Opts {
     wasm_file_path: String,
-    port: u16,
-    protocol: Option<String>,
+    filter: String,
     interface: String,
     is_promiscuous: bool,
 }
 
 fn parse_opts() -> Result<Opts, Box<dyn Error>> {
-    const PORT_LONG_OPT_NAME: &str = "port";
-    const PROTOCOL_LONG_OPT_NAME: &str = "protocol";
+    const FILTER_LONG_OPT_NAME: &str = "filter";
     const INTERFACE_LONG_OPT_NAME: &str = "interface";
     const PROMISCUOUS_LONG_OPT_NAME: &str = "promiscuous";
     const HELP_LONG_OPT_NAME: &str = "help";
@@ -35,18 +33,17 @@ fn parse_opts() -> Result<Opts, Box<dyn Error>> {
         "file path to the wasm file",
         "/path/to/app.wasm",
     );
-    opts.optopt("p", &PORT_LONG_OPT_NAME, "port number for capture", "PORT");
-    opts.optopt(
-        "P",
-        &PROTOCOL_LONG_OPT_NAME,
-        "layer 4 protocol name for capture",
-        "L4PROTOCOL",
-    );
     opts.optopt(
         "i",
         &INTERFACE_LONG_OPT_NAME,
         "network interface name",
         "INTERFACE",
+    );
+    opts.optopt(
+        "f",
+        &FILTER_LONG_OPT_NAME,
+        "packet capture filter condition; ref: https://biot.com/capstats/bpf.html",
+        "FILTER",
     );
     opts.optflag(
         "",
@@ -65,17 +62,23 @@ fn parse_opts() -> Result<Opts, Box<dyn Error>> {
         return Err("TODO: usage shown".into());
     }
 
-    let port = match matches.opt_str(&PORT_LONG_OPT_NAME) {
-        Some(port_str) => match port_str.parse::<u16>() {
-            Ok(port) => port,
-            Err(e) => {
-                return Err(e.into());
-            }
-        },
+    let wasm_file_path = match matches.opt_str(&WASM_FILE_LONG_OPT_NAME) {
+        Some(warm_file_path) => warm_file_path,
         None => {
             return Err(format!(
                 "--{} option is mandatory but the value is missing",
-                &PORT_LONG_OPT_NAME
+                &WASM_FILE_LONG_OPT_NAME
+            )
+            .into())
+        }
+    };
+
+    let filter = match matches.opt_str(&FILTER_LONG_OPT_NAME) {
+        Some(filter) => filter,
+        None => {
+            return Err(format!(
+                "--{} option is mandatory but the value is missing",
+                &FILTER_LONG_OPT_NAME
             )
             .into())
         }
@@ -92,21 +95,9 @@ fn parse_opts() -> Result<Opts, Box<dyn Error>> {
         }
     };
 
-    let wasm_file_path = match matches.opt_str(&WASM_FILE_LONG_OPT_NAME) {
-        Some(warm_file_path) => warm_file_path,
-        None => {
-            return Err(format!(
-                "--{} option is mandatory but the value is missing",
-                &WASM_FILE_LONG_OPT_NAME
-            )
-            .into())
-        }
-    };
-
     Ok(Opts {
         wasm_file_path,
-        port,
-        protocol: matches.opt_str(&PROTOCOL_LONG_OPT_NAME),
+        filter,
         interface,
         is_promiscuous: matches.opt_present(&PROMISCUOUS_LONG_OPT_NAME),
     })
@@ -143,11 +134,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .immediate_mode(true)
         .promisc(opts.is_promiscuous)
         .open()?;
-
-    cap.filter(
-        &format!("{} port {}", opts.protocol.unwrap_or("".into()), opts.port),
-        true,
-    )?;
+    cap.filter(&opts.filter, true)?;
 
     let vm = init_wasm_vm(Path::new(&opts.wasm_file_path))?;
 
