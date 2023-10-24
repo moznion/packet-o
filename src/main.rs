@@ -29,67 +29,67 @@ fn parse_opts() -> Result<Opts, Box<dyn Error>> {
     let mut opts = Options::new();
     opts.optopt(
         "w",
-        &WASM_FILE_LONG_OPT_NAME,
+        WASM_FILE_LONG_OPT_NAME,
         "file path to the wasm file",
         "/path/to/app.wasm",
     );
     opts.optopt(
         "i",
-        &INTERFACE_LONG_OPT_NAME,
+        INTERFACE_LONG_OPT_NAME,
         "network interface name",
         "INTERFACE",
     );
     opts.optopt(
         "f",
-        &FILTER_LONG_OPT_NAME,
+        FILTER_LONG_OPT_NAME,
         "packet capture filter condition; ref: https://biot.com/capstats/bpf.html",
         "FILTER",
     );
     opts.optflag(
         "",
-        &PROMISCUOUS_LONG_OPT_NAME,
+        PROMISCUOUS_LONG_OPT_NAME,
         "capture packets as promiscuous mode",
     );
-    opts.optflag("h", &HELP_LONG_OPT_NAME, "print this help menu");
+    opts.optflag("h", HELP_LONG_OPT_NAME, "print this help menu");
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(f) => return Err(f.into()),
     };
 
-    if matches.opt_present(&HELP_LONG_OPT_NAME) {
+    if matches.opt_present(HELP_LONG_OPT_NAME) {
         let brief = format!("Usage: {} [options]", program);
         print!("{}", opts.usage(&brief));
         return Err("TODO: usage shown".into());
     }
 
-    let wasm_file_path = match matches.opt_str(&WASM_FILE_LONG_OPT_NAME) {
+    let wasm_file_path = match matches.opt_str(WASM_FILE_LONG_OPT_NAME) {
         Some(warm_file_path) => warm_file_path,
         None => {
             return Err(format!(
                 "--{} option is mandatory but the value is missing",
-                &WASM_FILE_LONG_OPT_NAME
+                WASM_FILE_LONG_OPT_NAME
             )
             .into())
         }
     };
 
-    let filter = match matches.opt_str(&FILTER_LONG_OPT_NAME) {
+    let filter = match matches.opt_str(FILTER_LONG_OPT_NAME) {
         Some(filter) => filter,
         None => {
             return Err(format!(
                 "--{} option is mandatory but the value is missing",
-                &FILTER_LONG_OPT_NAME
+                FILTER_LONG_OPT_NAME
             )
             .into())
         }
     };
 
-    let interface = match matches.opt_str(&INTERFACE_LONG_OPT_NAME) {
+    let interface = match matches.opt_str(INTERFACE_LONG_OPT_NAME) {
         Some(interface) => interface,
         None => {
             return Err(format!(
                 "--{} option is mandatory but the value is missing",
-                &INTERFACE_LONG_OPT_NAME
+                INTERFACE_LONG_OPT_NAME
             )
             .into())
         }
@@ -99,7 +99,7 @@ fn parse_opts() -> Result<Opts, Box<dyn Error>> {
         wasm_file_path,
         filter,
         interface,
-        is_promiscuous: matches.opt_present(&PROMISCUOUS_LONG_OPT_NAME),
+        is_promiscuous: matches.opt_present(PROMISCUOUS_LONG_OPT_NAME),
     })
 }
 
