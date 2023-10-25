@@ -6,6 +6,7 @@ use std::path::Path;
 use wasmedge_sdk::{
     config::{CommonConfigOptions, ConfigBuilder, HostRegistrationConfigOptions},
     dock::{Param, VmDock},
+    plugin::PluginManager,
     Module, VmBuilder,
 };
 
@@ -14,6 +15,7 @@ struct Opts {
     filter: String,
     interface: String,
     is_promiscuous: bool,
+    enable_tls_plugin: bool,
 }
 
 fn parse_opts() -> Result<Opts, Box<dyn Error>> {
@@ -22,6 +24,7 @@ fn parse_opts() -> Result<Opts, Box<dyn Error>> {
     const PROMISCUOUS_LONG_OPT_NAME: &str = "promiscuous";
     const HELP_LONG_OPT_NAME: &str = "help";
     const WASM_FILE_LONG_OPT_NAME: &str = "wasm-file";
+    const TLS_LONG_OPT_NAME: &str = "tls-enable";
 
     let args: Vec<String> = env::args().collect();
     let program = args[0].clone();
@@ -49,6 +52,11 @@ fn parse_opts() -> Result<Opts, Box<dyn Error>> {
         "",
         PROMISCUOUS_LONG_OPT_NAME,
         "capture packets as promiscuous mode",
+    );
+    opts.optflag(
+        "",
+        TLS_LONG_OPT_NAME,
+        "enable WasmEdge TLS plugin; WasmEdge rustls plugin must be installed",
     );
     opts.optflag("h", HELP_LONG_OPT_NAME, "print this help menu");
     let matches = match opts.parse(&args[1..]) {
@@ -100,10 +108,13 @@ fn parse_opts() -> Result<Opts, Box<dyn Error>> {
         filter,
         interface,
         is_promiscuous: matches.opt_present(PROMISCUOUS_LONG_OPT_NAME),
+        enable_tls_plugin: matches.opt_present(TLS_LONG_OPT_NAME),
     })
 }
 
-fn init_wasm_vm(wasm_filepath: &Path) -> Result<VmDock, Box<dyn Error>> {
+fn init_wasm_vm(wasm_filepath: &Path, enable_tls_plugin: bool) -> Result<VmDock, Box<dyn Error>> {
+    PluginManager::load(None)?;
+
     let module = Module::from_file(None, wasm_filepath)?;
 
     let config = ConfigBuilder::new(CommonConfigOptions::default())
@@ -114,11 +125,13 @@ fn init_wasm_vm(wasm_filepath: &Path) -> Result<VmDock, Box<dyn Error>> {
         return Err("wasi is unable on WasmEdge configuration".into());
     }
 
+    let mut vm_builder = VmBuilder::new().with_config(config);
+    if enable_tls_plugin {
+        vm_builder = vm_builder.with_plugin("rustls", "rustls_client");
+    }
+
     Ok(VmDock::new(
-        VmBuilder::new()
-            .with_config(config)
-            .build()?
-            .register_module(None, module)?,
+        vm_builder.build()?.register_module(None, module)?,
     ))
 }
 
@@ -136,7 +149,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .open()?;
     cap.filter(&opts.filter, true)?;
 
-    let vm = init_wasm_vm(Path::new(&opts.wasm_file_path))?;
+    let vm = init_wasm_vm(Path::new(&opts.wasm_file_path), opts.enable_tls_plugin)?;
 
     while let Ok(packet) = cap.next_packet() {
         match vm.run_func("run", vec![Param::VecU8(&packet.data.to_vec())])? {
